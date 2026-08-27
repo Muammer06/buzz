@@ -82,15 +82,44 @@ test("isOsFileDrag is true for Files and uri-list, not plain text", () => {
   assert.equal(isOsFileDrag(null), false);
 });
 
-test("extractDroppedFilePayload prefers File objects over path text", () => {
-  const file = { name: "a.png" };
+test("extractDroppedFilePayload prefers usable File objects over path text", () => {
+  const file = { name: "a.png", size: 12 };
   const data = {
     files: [file],
+    types: ["Files", "text/uri-list"],
     getData: () => "file:///tmp/ignored.png",
   };
   assert.deepEqual(extractDroppedFilePayload(data), {
     files: [file],
     paths: [],
+  });
+});
+
+test("extractDroppedFilePayload ignores dummy File objects and reads paths", () => {
+  const dummy = { name: "", size: 0 };
+  const data = {
+    files: [dummy],
+    types: ["Files", "text/uri-list"],
+    getData: (type) => (type === "text/uri-list" ? "file:///tmp/a.png" : ""),
+  };
+  assert.deepEqual(extractDroppedFilePayload(data), {
+    files: [],
+    paths: ["/tmp/a.png"],
+  });
+});
+
+test("extractDroppedFilePayload reads GNOME copied-files lists", () => {
+  const data = {
+    files: [],
+    types: ["x-special/gnome-copied-files"],
+    getData: (type) =>
+      type === "x-special/gnome-copied-files"
+        ? "copy\nfile:///tmp/a.png"
+        : "",
+  };
+  assert.deepEqual(extractDroppedFilePayload(data), {
+    files: [],
+    paths: ["/tmp/a.png"],
   });
 });
 

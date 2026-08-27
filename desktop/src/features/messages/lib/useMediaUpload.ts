@@ -11,7 +11,14 @@ import {
   basenameFromPath,
   extractDroppedFilePayload,
   isOsFileDrag,
+  markOsFileDragOver,
 } from "./droppedFiles";
+import {
+  consumeDropPaths,
+  ensureOsDropListener,
+  noteOsFileDropTarget,
+  takePendingOsDropPaths,
+} from "./osFileDropBus";
 import { applyImetaUpdate, compactImetaSlots } from "./imetaSlots";
 import { useFilePicker } from "./useFilePicker";
 import { isVideoFile, videoMimeForFile } from "./videoFileType";
@@ -241,6 +248,9 @@ export function useMediaUpload({
 
   // ── Drag-over visual indicator state ───────────────────────────────
   const [isDragOver, setIsDragOver] = React.useState(false);
+  React.useEffect(() => {
+    ensureOsDropListener();
+  }, []);
   /** Tracks nested dragenter/dragleave pairs so we only flip `isDragOver`
    *  when the pointer truly enters or leaves the drop target. */
   const dragDepthRef = React.useRef(0);
@@ -707,7 +717,15 @@ export function useMediaUpload({
       event.stopPropagation();
       dragDepthRef.current = 0;
       setIsDragOver(false);
-      const { files, paths } = extractDroppedFilePayload(event.dataTransfer);
+      const extracted = extractDroppedFilePayload(event.dataTransfer);
+      const files = extracted.files;
+      let paths = extracted.paths;
+      if (files.length === 0 && paths.length === 0) {
+        // WebKitGTK: HTML5 payload is empty; GTK `os-file-drop` has the paths.
+        paths = takePendingOsDropPaths();
+      } else {
+        paths = consumeDropPaths(paths);
+      }
       if (files.length === 0 && paths.length === 0) return;
 
       // Accept any file. The Tauri layer and the relay enforce the deny-list
@@ -723,12 +741,14 @@ export function useMediaUpload({
     (event: React.DragEvent<HTMLElement>) => {
       if (!isOsFileDrag(event.dataTransfer)) return;
       event.preventDefault();
+      markOsFileDragOver(event.dataTransfer);
+      noteOsFileDropTarget(uploadDroppedPaths);
       dragDepthRef.current += 1;
       if (dragDepthRef.current === 1) {
         setIsDragOver(true);
       }
     },
-    [],
+    [uploadDroppedPaths],
   );
 
   const handleDragLeave = React.useCallback(
@@ -746,7 +766,9 @@ export function useMediaUpload({
 
   const handleDragOver = React.useCallback(
     (event: React.DragEvent<HTMLElement>) => {
+      if (!isOsFileDrag(event.dataTransfer)) return;
       event.preventDefault();
+      markOsFileDragOver(event.dataTransfer);
     },
     [],
   );

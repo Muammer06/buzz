@@ -31,6 +31,11 @@ export function useAppShellLifecycleEffects({
       const types = Array.from(e.dataTransfer?.types ?? []);
       if (types.includes("Files") || types.includes("text/uri-list")) {
         e.preventDefault();
+        try {
+          if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+        } catch {
+          // WebKitGTK may freeze dropEffect; preventDefault still matters.
+        }
       }
     }
     window.addEventListener("dragover", preventNavigation);
