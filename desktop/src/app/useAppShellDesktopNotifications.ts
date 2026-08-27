@@ -85,6 +85,13 @@ export function useAppShellDesktopNotifications({
         content: event.content,
       });
 
+      // Sound is independent of OS toast delivery — WebKitGTK / permission
+      // failures must not mute the chosen alert (block/buzz#2562).
+      if (shouldPlayNotificationSound(channel.id, silentChannelIds)) {
+        void playNotificationSound(
+          resolveSlotSound(notificationSettings, "dm"),
+        );
+      }
       void sendDesktopNotification({
         title,
         body,
@@ -94,9 +101,6 @@ export function useAppShellDesktopNotifications({
         }),
       }).then((didSend) => {
         if (!didSend) return;
-        if (shouldPlayNotificationSound(channel.id, silentChannelIds)) {
-          playNotificationSound(resolveSlotSound(notificationSettings, "dm"));
-        }
         void requestDockBounce();
       });
     },
@@ -128,6 +132,11 @@ export function useAppShellDesktopNotifications({
         content: event.content,
       });
 
+      if (shouldPlayNotificationSound(channelId, silentChannelIds)) {
+        void playNotificationSound(
+          resolveSlotSound(notificationSettings, "thread_reply"),
+        );
+      }
       void sendDesktopNotification({
         title,
         body,
@@ -137,11 +146,6 @@ export function useAppShellDesktopNotifications({
         }),
       }).then((didSend) => {
         if (!didSend) return;
-        if (shouldPlayNotificationSound(channelId, silentChannelIds)) {
-          playNotificationSound(
-            resolveSlotSound(notificationSettings, "thread_reply"),
-          );
-        }
         void requestDockBounce();
       });
     },

@@ -6,7 +6,12 @@ import {
   KIND_STREAM_MESSAGE_V2,
   KIND_JOB_ACCEPTED,
 } from "../../../shared/constants/kinds.ts";
-import { shouldPlayNotificationSound, slotForFeedKind } from "./sound.ts";
+import {
+  playNotificationSound,
+  resetNotificationSoundCache,
+  shouldPlayNotificationSound,
+  slotForFeedKind,
+} from "./sound.ts";
 
 test("routes each feed category to its own sound slot", () => {
   assert.equal(slotForFeedKind(KIND_STREAM_MESSAGE_V2, "mention"), "mention");
@@ -65,4 +70,89 @@ test("silences notifications from Huddle backing channels", () => {
     true,
   );
   assert.equal(shouldPlayNotificationSound(null, silentChannelIds), true);
+});
+
+test("plays notification sounds from a blob URL, not the custom-scheme path", async (t) => {
+  const originalAudio = globalThis.Audio;
+  const originalFetch = globalThis.fetch;
+  const originalCreateObjectURL = URL.createObjectURL;
+  const fetches = [];
+
+  class FakeAudio {
+    constructor(src) {
+      this.src = src;
+      this.currentTime = 99;
+      this.playCalls = 0;
+    }
+
+    play() {
+      this.playCalls += 1;
+      return Promise.resolve();
+    }
+  }
+
+  globalThis.Audio = FakeAudio;
+  globalThis.fetch = async (url) => {
+    fetches.push(url);
+    return {
+      ok: true,
+      arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
+    };
+  };
+  URL.createObjectURL = (blob) => {
+    assert.equal(blob.type, "audio/mpeg");
+    return "blob:notification-sound";
+  };
+  t.after(() => {
+    resetNotificationSoundCache();
+    globalThis.Audio = originalAudio;
+    globalThis.fetch = originalFetch;
+    URL.createObjectURL = originalCreateObjectURL;
+  });
+
+  const first = await playNotificationSound("bong");
+  const second = await playNotificationSound("bong");
+
+  assert.equal(fetches.length, 1);
+  assert.equal(fetches[0], "/sounds/bong.mp3");
+  assert.ok(first);
+  assert.equal(first.src, "blob:notification-sound");
+  assert.equal(first.currentTime, 0);
+  assert.equal(first.playCalls, 2);
+  assert.equal(second, first);
+});
+
+test("a failed sound fetch does not stick in the cache", async (t) => {
+  const originalAudio = globalThis.Audio;
+  const originalFetch = globalThis.fetch;
+  const originalWarn = console.warn;
+  const warnings = [];
+  let calls = 0;
+
+  globalThis.Audio = class {
+    play() {
+      return Promise.resolve();
+    }
+  };
+  globalThis.fetch = async () => {
+    calls += 1;
+    return {
+      ok: false,
+      status: 404,
+      arrayBuffer: async () => new ArrayBuffer(0),
+    };
+  };
+  console.warn = (...args) => warnings.push(args.join(" "));
+  t.after(() => {
+    resetNotificationSoundCache();
+    globalThis.Audio = originalAudio;
+    globalThis.fetch = originalFetch;
+    console.warn = originalWarn;
+  });
+
+  assert.equal(await playNotificationSound("ping"), null);
+  assert.equal(await playNotificationSound("ping"), null);
+  assert.equal(calls, 2);
+  assert.equal(warnings.length, 2);
+  assert.match(warnings[0], /sound play failed/);
 });

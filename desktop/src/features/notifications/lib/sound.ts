@@ -158,28 +158,68 @@ export function shouldPlayNotificationSound(
 }
 
 const cache = new Map<SoundName, HTMLAudioElement>();
+const loading = new Map<SoundName, Promise<HTMLAudioElement>>();
 
-function getAudio(name: SoundName): HTMLAudioElement {
-  let audio = cache.get(name);
-  if (!audio) {
-    audio = new Audio(`/sounds/${name}.mp3`);
-    cache.set(name, audio);
-  }
-  return audio;
+function soundUrl(name: SoundName): string {
+  return `/sounds/${name}.mp3`;
 }
 
-export function playNotificationSound(
-  name: SoundName,
-): HTMLAudioElement | null {
-  try {
-    const audio = getAudio(name);
-    audio.currentTime = 0;
-    audio.play().catch(() => {
-      // Best-effort — user may not have interacted with the page yet.
-    });
+/**
+ * WebKitGTK's media backend cannot decode media from Tauri's custom URI
+ * scheme (`tauri://…` / `http://tauri.localhost`), so `new Audio("/sounds/…")`
+ * fails with `MEDIA_ERR_SRC_NOT_SUPPORTED`. Fetching the asset through JS and
+ * handing the element a `blob:` URL works because `media-src` allows `blob:`
+ * (block/buzz#2562).
+ */
+async function loadAudio(name: SoundName): Promise<HTMLAudioElement> {
+  const cached = cache.get(name);
+  if (cached) {
+    return cached;
+  }
+
+  const inFlight = loading.get(name);
+  if (inFlight) {
+    return inFlight;
+  }
+
+  const promise = (async () => {
+    const response = await fetch(soundUrl(name));
+    if (!response.ok) {
+      throw new Error(
+        `Failed to fetch notification sound (${response.status})`,
+      );
+    }
+    const buffer = await response.arrayBuffer();
+    const blob = new Blob([buffer], { type: "audio/mpeg" });
+    const audio = new Audio(URL.createObjectURL(blob));
+    cache.set(name, audio);
     return audio;
-  } catch {
-    // Best-effort only.
+  })();
+
+  loading.set(name, promise);
+  try {
+    return await promise;
+  } finally {
+    loading.delete(name);
+  }
+}
+
+/** @internal Test-only: drop cached elements so load paths can be re-exercised. */
+export function resetNotificationSoundCache() {
+  cache.clear();
+  loading.clear();
+}
+
+export async function playNotificationSound(
+  name: SoundName,
+): Promise<HTMLAudioElement | null> {
+  try {
+    const audio = await loadAudio(name);
+    audio.currentTime = 0;
+    await audio.play();
+    return audio;
+  } catch (error) {
+    console.warn("[notifications] sound play failed", name, error);
     return null;
   }
 }
