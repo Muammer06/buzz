@@ -122,6 +122,66 @@ test("plays notification sounds from a blob URL, not the custom-scheme path", as
   assert.equal(second, first);
 });
 
+test("autoplay rejection falls back to AudioContext playback", async (t) => {
+  const originalAudio = globalThis.Audio;
+  const originalAudioContext = globalThis.AudioContext;
+  const originalFetch = globalThis.fetch;
+  const originalCreateObjectURL = URL.createObjectURL;
+  let started = 0;
+
+  class FakeAudio {
+    constructor(src) {
+      this.src = src;
+      this.currentTime = 0;
+    }
+
+    play() {
+      return Promise.reject(
+        Object.assign(new Error("play blocked"), { name: "NotAllowedError" }),
+      );
+    }
+  }
+
+  class FakeAudioContext {
+    state = "running";
+    destination = {};
+    resume() {
+      return Promise.resolve();
+    }
+    decodeAudioData() {
+      return Promise.resolve({ duration: 0.2 });
+    }
+    createBufferSource() {
+      return {
+        buffer: null,
+        connect() {},
+        start() {
+          started += 1;
+        },
+      };
+    }
+  }
+
+  globalThis.Audio = FakeAudio;
+  globalThis.AudioContext = FakeAudioContext;
+  globalThis.fetch = async () => ({
+    ok: true,
+    arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
+  });
+  URL.createObjectURL = () => "blob:notification-sound";
+  t.after(() => {
+    resetNotificationSoundCache();
+    globalThis.Audio = originalAudio;
+    globalThis.AudioContext = originalAudioContext;
+    globalThis.fetch = originalFetch;
+    URL.createObjectURL = originalCreateObjectURL;
+  });
+
+  const audio = await playNotificationSound("doop");
+  assert.ok(audio);
+  assert.equal(started, 1);
+});
+
 test("a failed sound fetch does not stick in the cache", async (t) => {
   const originalAudio = globalThis.Audio;
   const originalFetch = globalThis.fetch;

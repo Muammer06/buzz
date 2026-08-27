@@ -159,10 +159,118 @@ export function shouldPlayNotificationSound(
 
 const cache = new Map<SoundName, HTMLAudioElement>();
 const loading = new Map<SoundName, Promise<HTMLAudioElement>>();
+const decodedBuffers = new Map<SoundName, AudioBuffer>();
+const decoding = new Map<SoundName, Promise<AudioBuffer | null>>();
+
+let notificationAudioContext: AudioContext | null = null;
+let unlockInstalled = false;
 
 function soundUrl(name: SoundName): string {
   return `/sounds/${name}.mp3`;
 }
+
+function getNotificationAudioContext(): AudioContext | null {
+  if (typeof AudioContext === "undefined") {
+    return null;
+  }
+  try {
+    notificationAudioContext ??= new AudioContext({
+      latencyHint: "interactive",
+    });
+    return notificationAudioContext;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchSoundBytes(name: SoundName): Promise<ArrayBuffer> {
+  const response = await fetch(soundUrl(name));
+  if (!response.ok) {
+    throw new Error(`Failed to fetch notification sound (${response.status})`);
+  }
+  return response.arrayBuffer();
+}
+
+async function loadDecodedBuffer(name: SoundName): Promise<AudioBuffer | null> {
+  const cached = decodedBuffers.get(name);
+  if (cached) {
+    return cached;
+  }
+  const inFlight = decoding.get(name);
+  if (inFlight) {
+    return inFlight;
+  }
+
+  const ctx = getNotificationAudioContext();
+  if (!ctx) {
+    return null;
+  }
+
+  const promise = (async () => {
+    const bytes = await fetchSoundBytes(name);
+    const audioBuffer = await ctx.decodeAudioData(bytes.slice(0));
+    decodedBuffers.set(name, audioBuffer);
+    return audioBuffer;
+  })().catch((error) => {
+    console.warn("[notifications] sound decode failed", name, error);
+    return null;
+  });
+
+  decoding.set(name, promise);
+  try {
+    return await promise;
+  } finally {
+    decoding.delete(name);
+  }
+}
+
+function playDecodedBuffer(buffer: AudioBuffer): boolean {
+  const ctx = getNotificationAudioContext();
+  if (!ctx) {
+    return false;
+  }
+  try {
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(ctx.destination);
+    source.start();
+    return true;
+  } catch (error) {
+    console.warn("[notifications] AudioContext playback failed", error);
+    return false;
+  }
+}
+
+/**
+ * WebKitGTK autoplay blocks HTMLAudio without a user gesture. Resume the
+ * shared AudioContext (and decode the mp3s) on the first click/key so later
+ * live alerts can play without a gesture.
+ */
+export function unlockNotificationAudio() {
+  const ctx = getNotificationAudioContext();
+  if (ctx?.state === "suspended") {
+    void ctx.resume().catch(() => {});
+  }
+  for (const name of SOUND_NAMES) {
+    void loadDecodedBuffer(name);
+  }
+}
+
+function installNotificationAudioUnlock() {
+  if (unlockInstalled || typeof window === "undefined") {
+    return;
+  }
+  unlockInstalled = true;
+  const unlock = () => {
+    unlockNotificationAudio();
+    window.removeEventListener("pointerdown", unlock);
+    window.removeEventListener("keydown", unlock);
+  };
+  window.addEventListener("pointerdown", unlock);
+  window.addEventListener("keydown", unlock);
+}
+
+installNotificationAudioUnlock();
 
 /**
  * WebKitGTK's media backend cannot decode media from Tauri's custom URI
@@ -183,13 +291,7 @@ async function loadAudio(name: SoundName): Promise<HTMLAudioElement> {
   }
 
   const promise = (async () => {
-    const response = await fetch(soundUrl(name));
-    if (!response.ok) {
-      throw new Error(
-        `Failed to fetch notification sound (${response.status})`,
-      );
-    }
-    const buffer = await response.arrayBuffer();
+    const buffer = await fetchSoundBytes(name);
     const blob = new Blob([buffer], { type: "audio/mpeg" });
     const audio = new Audio(URL.createObjectURL(blob));
     cache.set(name, audio);
@@ -208,6 +310,8 @@ async function loadAudio(name: SoundName): Promise<HTMLAudioElement> {
 export function resetNotificationSoundCache() {
   cache.clear();
   loading.clear();
+  decodedBuffers.clear();
+  decoding.clear();
 }
 
 export async function playNotificationSound(
@@ -216,8 +320,23 @@ export async function playNotificationSound(
   try {
     const audio = await loadAudio(name);
     audio.currentTime = 0;
-    await audio.play();
-    return audio;
+    try {
+      await audio.play();
+      return audio;
+    } catch (playError) {
+      // Live alerts have no user gesture; WebKitGTK autoplay rejects
+      // HTMLAudio.play(). An AudioContext unlocked by an earlier click
+      // still plays (same path as the poof sound).
+      const ctx = getNotificationAudioContext();
+      if (ctx?.state === "suspended") {
+        await ctx.resume().catch(() => {});
+      }
+      const decoded = await loadDecodedBuffer(name);
+      if (decoded && playDecodedBuffer(decoded)) {
+        return audio;
+      }
+      throw playError;
+    }
   } catch (error) {
     console.warn("[notifications] sound play failed", name, error);
     return null;

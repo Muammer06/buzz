@@ -128,6 +128,14 @@ function shouldUseMacDevelopmentFallback(error: unknown): boolean {
 }
 
 export async function getDesktopNotificationPermissionState(): Promise<DesktopNotificationPermissionState> {
+  // Linux toasts go through notify_rust / D-Bus, not WebKit's Notification
+  // API. WebKitGTK often reports "denied" (or omits the API) for `tauri dev`
+  // and AppImages without a portal grant, which previously forced
+  // desktopEnabled off and silenced every alert — including in-app sounds.
+  if (isTauri() && isLinuxPlatform()) {
+    return "granted";
+  }
+
   if (!hasNotificationApi()) {
     return "unsupported";
   }
@@ -165,6 +173,10 @@ let pendingPermissionRequest: Promise<DesktopNotificationPermissionState> | null
   null;
 
 export async function requestDesktopNotificationAccess(): Promise<DesktopNotificationPermissionState> {
+  if (isTauri() && isLinuxPlatform()) {
+    return "granted";
+  }
+
   if (!hasNotificationApi()) {
     return "unsupported";
   }
@@ -418,9 +430,10 @@ export async function revealDesktopAppWindow(): Promise<void> {
 export async function sendDesktopNotification(
   payload: DesktopNotificationPayload,
 ): Promise<boolean> {
-  if ((await getDesktopNotificationPermissionState()) !== "granted") {
-    return false;
-  }
+  // Linux native D-Bus posting does not use WebKit permission. Check it
+  // only for the WebKit / plugin fallbacks below.
+  const canUseWebKitNotification =
+    (await getDesktopNotificationPermissionState()) === "granted";
 
   // Linux needs a retained D-Bus connection. macOS needs a native notification
   // center delegate because the Tauri plugin does not deliver desktop clicks.
@@ -433,7 +446,8 @@ export async function sendDesktopNotification(
         target: payload.target ?? null,
       });
       return true;
-    } catch {
+    } catch (error) {
+      console.warn("[desktop] native notification failed:", error);
       if (!isMacPlatform()) {
         return false;
       }
@@ -441,6 +455,10 @@ export async function sendDesktopNotification(
       // used by Tauri dev. Preserve the previous macOS development behavior by
       // falling through to the notification plugin; packaged apps use native UN.
     }
+  }
+
+  if (!canUseWebKitNotification) {
+    return false;
   }
 
   // block/buzz#5081 — WebKit throws `NotificationError` from the constructor
