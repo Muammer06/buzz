@@ -663,6 +663,7 @@ pub fn run() {
             upload_media,
             pick_and_upload_media,
             pick_and_upload_image,
+            upload_dropped_media,
             upload_media_bytes,
             upload_media_bytes_raw,
             cancel_media_upload,

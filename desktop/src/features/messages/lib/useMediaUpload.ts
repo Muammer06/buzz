@@ -5,8 +5,13 @@ import {
   pickAndUploadMedia,
   uploadMediaBytes,
 } from "@/shared/api/tauri";
-import { uploadMediaFile } from "@/shared/api/tauriMedia";
+import { uploadDroppedMedia, uploadMediaFile } from "@/shared/api/tauriMedia";
 import type { QueuedMediaAttachment } from "./backgroundMediaUploadStore";
+import {
+  basenameFromPath,
+  extractDroppedFilePayload,
+  isOsFileDrag,
+} from "./droppedFiles";
 import { applyImetaUpdate, compactImetaSlots } from "./imetaSlots";
 import { useFilePicker } from "./useFilePicker";
 import { isVideoFile, videoMimeForFile } from "./videoFileType";
@@ -50,10 +55,11 @@ function uploadProgressId(previewId: number): string {
   return `composer-upload-${previewId}`;
 }
 
-/** True when the drag payload contains files (not plain text or URLs). */
-function isFileDrag(event: React.DragEvent<HTMLElement>): boolean {
-  return event.dataTransfer?.types.includes("Files") ?? false;
-}
+type ComposerFileDropEvent = {
+  dataTransfer: DataTransfer | null;
+  preventDefault: () => void;
+  stopPropagation: () => void;
+};
 
 function waitForMediaEvent(
   element: HTMLMediaElement,
@@ -662,27 +668,60 @@ export function useMediaUpload({
     uploadFiles,
   ]);
 
+  const uploadDroppedPaths = React.useCallback(
+    (paths: string[]) => {
+      if (paths.length === 0) return;
+
+      setUploadingCount((count) => count + paths.length);
+      const baseIndex = reserveSlots(paths.length);
+      const epoch = uploadEpochRef.current;
+
+      for (let index = 0; index < paths.length; index++) {
+        const path = paths[index];
+        if (!path) continue;
+        const slotIndex = baseIndex + index;
+        const previewFile = new File([], basenameFromPath(path));
+        const previewId = reserveUploadingPreview(previewFile, slotIndex);
+        void (async () => {
+          try {
+            const [descriptor] = await uploadDroppedMedia(
+              [path],
+              uploadProgressId(previewId),
+            );
+            if (!descriptor) {
+              throw new Error("empty drop upload");
+            }
+            fillSlot(slotIndex, descriptor, previewId, epoch);
+          } catch (err) {
+            onUploadError(err, previewId);
+          }
+        })();
+      }
+    },
+    [fillSlot, onUploadError, reserveSlots, reserveUploadingPreview],
+  );
+
   const handleDrop = React.useCallback(
-    async (event: React.DragEvent<HTMLElement>) => {
+    async (event: ComposerFileDropEvent) => {
       event.preventDefault();
+      event.stopPropagation();
       dragDepthRef.current = 0;
       setIsDragOver(false);
-      const files = Array.from(event.dataTransfer.files);
-      if (files.length === 0) return;
+      const { files, paths } = extractDroppedFilePayload(event.dataTransfer);
+      if (files.length === 0 && paths.length === 0) return;
 
       // Accept any file. The Tauri layer and the relay enforce the deny-list
       // (active-content + executables) and size caps; everything else uploads.
-      const validFiles = files;
-
-      queueFiles(validFiles.filter(shouldQueueFile));
-      uploadFiles(validFiles.filter((file) => !shouldQueueFile(file)));
+      queueFiles(files.filter(shouldQueueFile));
+      uploadFiles(files.filter((file) => !shouldQueueFile(file)));
+      uploadDroppedPaths(paths);
     },
-    [queueFiles, shouldQueueFile, uploadFiles],
+    [queueFiles, shouldQueueFile, uploadDroppedPaths, uploadFiles],
   );
 
   const handleDragEnter = React.useCallback(
     (event: React.DragEvent<HTMLElement>) => {
-      if (!isFileDrag(event)) return;
+      if (!isOsFileDrag(event.dataTransfer)) return;
       event.preventDefault();
       dragDepthRef.current += 1;
       if (dragDepthRef.current === 1) {
@@ -694,7 +733,7 @@ export function useMediaUpload({
 
   const handleDragLeave = React.useCallback(
     (event: React.DragEvent<HTMLElement>) => {
-      if (!isFileDrag(event)) return;
+      if (!isOsFileDrag(event.dataTransfer)) return;
       event.preventDefault();
       dragDepthRef.current -= 1;
       if (dragDepthRef.current <= 0) {
