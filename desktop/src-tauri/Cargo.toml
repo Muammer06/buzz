@@ -82,6 +82,8 @@ tauri-plugin-window-state = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+# Linux/Windows login item so the tray process comes back after reboot.
+tauri-plugin-autostart = "2"
 infer = "0.19"
 hex = "0.4"
 ed25519-dalek = "=3.0.0-rc.0"
