@@ -44,7 +44,11 @@ export type UseLiveChannelUpdatesOptions = {
    * drive the observed unread-event map that powers sidebar unread state.
    * See `UNREAD_TRIGGER_KINDS` for the exact kind set.
    */
-  onChannelMessage?: (channelId: string, event: RelayEvent) => void;
+  onChannelMessage?: (
+    channelId: string,
+    event: RelayEvent,
+    delivery?: { suppressDesktopToast?: boolean },
+  ) => void;
   /**
    * Fired for thread replies that should be surfaced as Home inbox activity.
    */
@@ -311,7 +315,9 @@ export function useLiveChannelUpdates(
           options.onThreadReplyCandidate?.(channelId, event);
         }
       } else {
-        options.onChannelMessage?.(channelId, event);
+        const suppressDesktopToast =
+          channelId === activeChannelId && !options.notifyForActiveChannel;
+        options.onChannelMessage?.(channelId, event, { suppressDesktopToast });
         if (isHomeActivityEvent(isDmChannel, isThreadedReply)) {
           options.onThreadReplyNotification?.(channelId, event);
         }

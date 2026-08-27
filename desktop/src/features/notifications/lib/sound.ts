@@ -23,6 +23,7 @@ export const SOUND_NAMES = [
 export type SoundName = (typeof SOUND_NAMES)[number];
 
 export const SOUND_SLOTS = [
+  "all_messages",
   "dm",
   "mention",
   "thread_reply",
@@ -35,6 +36,7 @@ export const SOUND_SLOTS = [
 export type SoundSlot = (typeof SOUND_SLOTS)[number];
 
 export const SLOT_LABELS: Record<SoundSlot, string> = {
+  all_messages: "All messages",
   dm: "Direct messages",
   mention: "@Mentions",
   thread_reply: "Thread replies",
@@ -57,6 +59,7 @@ export const COMING_SOON_SLOTS: ReadonlySet<SoundSlot> = new Set([
 ]);
 
 export const SLOT_DESCRIPTIONS: Record<SoundSlot, string> = {
+  all_messages: "When someone posts in a channel.",
   dm: "When someone messages you directly.",
   mention: "When someone tags you in a channel.",
   thread_reply: "When someone replies in a thread you follow or posted in.",
@@ -68,6 +71,7 @@ export const SLOT_DESCRIPTIONS: Record<SoundSlot, string> = {
 };
 
 export const RECOMMENDED_SOUND_BY_SLOT: Record<SoundSlot, SoundName> = {
+  all_messages: "doop",
   dm: "unison",
   mention: "ping",
   thread_reply: "doop",
@@ -81,6 +85,7 @@ export const RECOMMENDED_SOUND_BY_SLOT: Record<SoundSlot, SoundName> = {
 export type SlotSounds = Record<SoundSlot, SoundName>;
 
 export const DEFAULT_SLOT_SOUNDS: SlotSounds = {
+  all_messages: "flutter",
   dm: "flutter",
   mention: "flutter",
   thread_reply: "flutter",
@@ -93,6 +98,7 @@ export const DEFAULT_SLOT_SOUNDS: SlotSounds = {
 
 /** Per-event alerts (notification + sound) on/off. */
 export const DEFAULT_SLOT_ALERTS_ENABLED: Record<SoundSlot, boolean> = {
+  all_messages: true,
   dm: true,
   mention: true,
   thread_reply: true,

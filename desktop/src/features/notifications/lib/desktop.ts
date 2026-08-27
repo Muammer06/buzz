@@ -6,10 +6,15 @@ import {
   onAction,
   requestPermission,
 } from "@tauri-apps/plugin-notification";
-import { isLinuxPlatform, isMacPlatform } from "@/shared/lib/platform";
+import {
+  isLinuxPlatform,
+  isMacPlatform,
+  isWindowsPlatform,
+} from "@/shared/lib/platform";
 
-// Backend event emitted when a native Linux notification is clicked or a
-// queued macOS activation becomes available. See src-tauri notification code.
+// Backend event emitted when a native Linux/Windows notification is clicked
+// or a queued macOS activation becomes available. See src-tauri notification
+// code.
 const NATIVE_NOTIFICATION_ACTIVATED_EVENT = "native-notification-activated";
 const TAKE_PENDING_MACOS_NOTIFICATION_ACTIVATIONS = "take_pending_activations";
 const MACOS_NOTIFICATION_PERMISSION_STATE = "notification_permission_state";
@@ -128,11 +133,10 @@ function shouldUseMacDevelopmentFallback(error: unknown): boolean {
 }
 
 export async function getDesktopNotificationPermissionState(): Promise<DesktopNotificationPermissionState> {
-  // Linux toasts go through notify_rust / D-Bus, not WebKit's Notification
-  // API. WebKitGTK often reports "denied" (or omits the API) for `tauri dev`
-  // and AppImages without a portal grant, which previously forced
-  // desktopEnabled off and silenced every alert — including in-app sounds.
-  if (isTauri() && isLinuxPlatform()) {
+  // Linux and Windows toasts go through notify_rust, not the webview
+  // Notification API. WebKitGTK often reports "denied" for `tauri dev`
+  // without a portal grant, which previously forced desktopEnabled off.
+  if (isTauri() && (isLinuxPlatform() || isWindowsPlatform())) {
     return "granted";
   }
 
@@ -173,7 +177,7 @@ let pendingPermissionRequest: Promise<DesktopNotificationPermissionState> | null
   null;
 
 export async function requestDesktopNotificationAccess(): Promise<DesktopNotificationPermissionState> {
-  if (isTauri() && isLinuxPlatform()) {
+  if (isTauri() && (isLinuxPlatform() || isWindowsPlatform())) {
     return "granted";
   }
 
@@ -244,8 +248,9 @@ export async function listenForDesktopNotificationActions(
       }
     }
 
-    // Linux forwards the target as the event payload. macOS queues targets in
-    // Rust first so cold-start clicks survive until this listener is mounted.
+    // Linux and Windows forward the target as the event payload. macOS queues
+    // targets in Rust first so cold-start clicks survive until this listener
+    // is mounted.
     const dispatchNativeActivations = async (payload?: unknown) => {
       if (usesMacActivationQueue) {
         const targets = await invoke<unknown[]>(
@@ -430,15 +435,19 @@ export async function revealDesktopAppWindow(): Promise<void> {
 export async function sendDesktopNotification(
   payload: DesktopNotificationPayload,
 ): Promise<boolean> {
-  // Linux native D-Bus posting does not use WebKit permission. Check it
-  // only for the WebKit / plugin fallbacks below.
+  // Linux/Windows native posting does not use the webview Notification API.
+  // Check permission only for the WebKit / plugin fallbacks below.
   const canUseWebKitNotification =
     (await getDesktopNotificationPermissionState()) === "granted";
 
-  // Linux needs a retained D-Bus connection. macOS needs a native notification
-  // center delegate because the Tauri plugin does not deliver desktop clicks.
-  // See src-tauri/src/commands/notifications.rs.
-  if (isTauri() && (isLinuxPlatform() || isMacPlatform())) {
+  // Linux needs a retained D-Bus connection. Windows uses WinRT toasts so
+  // WebView2 permission cannot mute All messages. macOS needs a native
+  // notification center delegate because the Tauri plugin does not deliver
+  // desktop clicks. See src-tauri/src/commands/notifications.rs.
+  if (
+    isTauri() &&
+    (isLinuxPlatform() || isMacPlatform() || isWindowsPlatform())
+  ) {
     try {
       await invoke("show_native_notification", {
         title: payload.title,
@@ -448,12 +457,12 @@ export async function sendDesktopNotification(
       return true;
     } catch (error) {
       console.warn("[desktop] native notification failed:", error);
-      if (!isMacPlatform()) {
+      if (isLinuxPlatform()) {
         return false;
       }
       // UNUserNotificationCenter is unavailable to the unbundled executable
-      // used by Tauri dev. Preserve the previous macOS development behavior by
-      // falling through to the notification plugin; packaged apps use native UN.
+      // used by Tauri dev. An unpackaged Windows AUMID can similarly fail.
+      // Fall through to the notification plugin / WebKit constructor.
     }
   }
 

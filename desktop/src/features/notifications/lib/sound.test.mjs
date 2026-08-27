@@ -7,11 +7,18 @@ import {
   KIND_JOB_ACCEPTED,
 } from "../../../shared/constants/kinds.ts";
 import {
+  DEFAULT_SLOT_ALERTS_ENABLED,
   playNotificationSound,
   resetNotificationSoundCache,
   shouldPlayNotificationSound,
   slotForFeedKind,
+  SOUND_SLOTS,
 } from "./sound.ts";
+
+test("all-messages alerts are first and on by default", () => {
+  assert.equal(SOUND_SLOTS[0], "all_messages");
+  assert.equal(DEFAULT_SLOT_ALERTS_ENABLED.all_messages, true);
+});
 
 test("routes each feed category to its own sound slot", () => {
   assert.equal(slotForFeedKind(KIND_STREAM_MESSAGE_V2, "mention"), "mention");
