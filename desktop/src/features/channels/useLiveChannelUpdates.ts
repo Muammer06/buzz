@@ -31,7 +31,11 @@ export type UseLiveChannelUpdatesOptions = {
    * currently viewing (normally suppressed).
    */
   notifyForActiveChannel?: boolean;
-  onDmMessage?: (event: RelayEvent, channel: Channel) => void;
+  onDmMessage?: (
+    event: RelayEvent,
+    channel: Channel,
+    delivery?: { suppressDesktopToast?: boolean },
+  ) => void;
   onLiveMention?: () => void;
   /**
    * Fired for live "new content" events in a member channel authored by
@@ -60,6 +64,7 @@ export type UseLiveChannelUpdatesOptions = {
   onThreadReplyDesktopNotification?: (
     channelId: string,
     event: RelayEvent,
+    delivery?: { suppressDesktopToast?: boolean },
   ) => void;
   onSelfChannelMessage?: (event: RelayEvent) => void;
   participatedRootIds?: ReadonlySet<string>;
@@ -219,13 +224,13 @@ export function useLiveChannelUpdates(
         return;
       }
 
-      // Don't fire a notification for the channel the user is already viewing,
-      // unless the notify-while-viewing setting opts in.
-      if (channelId === activeChannelId && !options.notifyForActiveChannel) {
-        return;
-      }
-
-      options.onDmMessage?.(event, dmChannel);
+      // OS toasts stay quiet for the open conversation unless
+      // notify-while-viewing is on. In-app sound still plays — otherwise a
+      // test ping you are looking at appears silent even though Settings
+      // preview works.
+      const suppressDesktopToast =
+        channelId === activeChannelId && !options.notifyForActiveChannel;
+      options.onDmMessage?.(event, dmChannel, { suppressDesktopToast });
     },
   );
 
@@ -313,11 +318,12 @@ export function useLiveChannelUpdates(
       }
 
       if (shouldNotify && isThreadedReply) {
-        if (
-          !dmChannelMap.has(channelId) &&
-          (channelId !== activeChannelId || options.notifyForActiveChannel)
-        ) {
-          options.onThreadReplyDesktopNotification?.(channelId, event);
+        if (!dmChannelMap.has(channelId)) {
+          const suppressDesktopToast =
+            channelId === activeChannelId && !options.notifyForActiveChannel;
+          options.onThreadReplyDesktopNotification?.(channelId, event, {
+            suppressDesktopToast,
+          });
         }
       }
     }

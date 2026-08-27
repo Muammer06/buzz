@@ -68,7 +68,11 @@ export function useAppShellDesktopNotifications({
   );
 
   const handleDmNotification = React.useEffectEvent(
-    (event: RelayEvent, channel: Channel) => {
+    (
+      event: RelayEvent,
+      channel: Channel,
+      delivery?: { suppressDesktopToast?: boolean },
+    ) => {
       if (!enabled) return;
       if (
         !notificationSettings.desktopEnabled ||
@@ -92,6 +96,9 @@ export function useAppShellDesktopNotifications({
           resolveSlotSound(notificationSettings, "dm"),
         );
       }
+      if (delivery?.suppressDesktopToast) {
+        return;
+      }
       void sendDesktopNotification({
         title,
         body,
@@ -107,7 +114,11 @@ export function useAppShellDesktopNotifications({
   );
 
   const handleThreadReplyDesktopNotification = React.useEffectEvent(
-    (channelId: string, event: RelayEvent) => {
+    (
+      channelId: string,
+      event: RelayEvent,
+      delivery?: { suppressDesktopToast?: boolean },
+    ) => {
       if (!enabled) return;
       if (
         !notificationSettings.desktopEnabled ||
@@ -136,6 +147,9 @@ export function useAppShellDesktopNotifications({
         void playNotificationSound(
           resolveSlotSound(notificationSettings, "thread_reply"),
         );
+      }
+      if (delivery?.suppressDesktopToast) {
+        return;
       }
       void sendDesktopNotification({
         title,

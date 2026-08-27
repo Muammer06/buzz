@@ -76,7 +76,7 @@ export function SoundPicker({
     }
     const generation = playGenerationRef.current + 1;
     playGenerationRef.current = generation;
-    void playNotificationSound(value).then((audio) => {
+    void playNotificationSound(value, { preview: true }).then((audio) => {
       if (generation !== playGenerationRef.current) {
         audio?.pause();
         return;

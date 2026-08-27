@@ -170,11 +170,18 @@ function soundUrl(name: SoundName): string {
 }
 
 function getNotificationAudioContext(): AudioContext | null {
-  if (typeof AudioContext === "undefined") {
+  const ContextCtor =
+    globalThis.AudioContext ??
+    (
+      globalThis as typeof globalThis & {
+        webkitAudioContext?: typeof AudioContext;
+      }
+    ).webkitAudioContext;
+  if (!ContextCtor) {
     return null;
   }
   try {
-    notificationAudioContext ??= new AudioContext({
+    notificationAudioContext ??= new ContextCtor({
       latencyHint: "interactive",
     });
     return notificationAudioContext;
@@ -312,31 +319,35 @@ export function resetNotificationSoundCache() {
   loading.clear();
   decodedBuffers.clear();
   decoding.clear();
+  notificationAudioContext = null;
 }
 
 export async function playNotificationSound(
   name: SoundName,
+  options?: { preview?: boolean },
 ): Promise<HTMLAudioElement | null> {
+  const preview = options?.preview === true;
   try {
-    const audio = await loadAudio(name);
-    audio.currentTime = 0;
-    try {
-      await audio.play();
-      return audio;
-    } catch (playError) {
-      // Live alerts have no user gesture; WebKitGTK autoplay rejects
-      // HTMLAudio.play(). An AudioContext unlocked by an earlier click
-      // still plays (same path as the poof sound).
+    // Settings preview is a click, so HTMLAudio.play() is allowed and gives
+    // pause/ended. Live alerts have no gesture: WebKitGTK often *resolves*
+    // play() while staying silent, so AudioContext must go first.
+    if (!preview) {
       const ctx = getNotificationAudioContext();
       if (ctx?.state === "suspended") {
         await ctx.resume().catch(() => {});
       }
-      const decoded = await loadDecodedBuffer(name);
-      if (decoded && playDecodedBuffer(decoded)) {
-        return audio;
+      if (ctx?.state === "running") {
+        const decoded = await loadDecodedBuffer(name);
+        if (decoded && playDecodedBuffer(decoded)) {
+          return cache.get(name) ?? (await loadAudio(name).catch(() => null));
+        }
       }
-      throw playError;
     }
+
+    const audio = await loadAudio(name);
+    audio.currentTime = 0;
+    await audio.play();
+    return audio;
   } catch (error) {
     console.warn("[notifications] sound play failed", name, error);
     return null;
